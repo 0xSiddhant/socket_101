@@ -28,7 +28,7 @@ class ChatClient {
     func connect() {
         let nwHost = NWEndpoint.Host(host)
         guard let nwPort = NWEndpoint.Port(rawValue: self.port) else {
-            print("Invalid port")
+            logger.error("Invalid port: \(self.port)")
             return
         }
         
@@ -47,18 +47,18 @@ class ChatClient {
         connection?.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                print("Ready")
+                self?.logger.info("WebSocket connection ready")
                 self?.receive()
             case .failed(let error):
-                print("Failed to connect with", error)
+                self?.logger.error("Failed to connect: \(error.localizedDescription)")
             case .setup:
-                print("Setup")
+                self?.logger.debug("Connection setup")
             case .waiting(_):
-                print("Waiting")
+                self?.logger.debug("Connection waiting")
             case .preparing:
-                print("Preparing")
+                self?.logger.debug("Connection preparing")
             case .cancelled:
-                print("cancelled")
+                self?.logger.info("Connection cancelled")
             @unknown default:
                 fatalError()
             }
@@ -72,17 +72,16 @@ class ChatClient {
         let meta = NWProtocolWebSocket.Metadata(opcode: opCode)
         let context = NWConnection.ContentContext(identifier: UUID().uuidString, metadata: [meta])
         
-        connection.send(content: content, contentContext: context, isComplete: true, completion: .contentProcessed({ error in
+        connection.send(content: content, contentContext: context, isComplete: true, completion: .contentProcessed({ [weak self] error in
             if let error {
-                print("ERROR: ", error.localizedDescription)
-                //                self.logger.error(error.localizedDescription)
+                self?.logger.error("Send error: \(error.localizedDescription)")
             }
         }))
     }
     
     func receive() {
         connection?.receiveMessage { [weak self] data, context, isComplete, error in
-            print(context?.isFinal ?? "__", isComplete)
+            self?.logger.debug("Receive context - isFinal: \(context?.isFinal ?? false), isComplete: \(isComplete)")
             if let isFinal = context?.isFinal,
                isFinal,
                isComplete {
@@ -90,45 +89,44 @@ class ChatClient {
                 return
             }
             if let error = error {
-                print("❌ NWWebSocket receive error: \(error)")
+                self?.logger.error("NWWebSocket receive error: \(error.localizedDescription)")
                 return
             }
             
             // Inspect metadata (opcode etc.)
-            if let ctx = context {
-                if let wsMeta = ctx.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata {
-                    self?.opCode = wsMeta.opcode
-                    switch wsMeta.opcode {
-                    case .text:
-                        if let d = data, let text = String(data: d, encoding: .utf8) {
-                            print("📥 Received text: \(text)")
-                            self?.onMessageReceiveCallback?(text)
-                        } else {
-                            print("📥 Received empty text frame")
-                        }
-                    case .binary:
-                        print("📥 Received binary: \(data?.count ?? 0) bytes")
-                    case .ping:
-                        print("📥 Received ping (responding with pong)")
-                        self?.sendPong()
-                    case .pong:
-                        print("📥 Received pong")
-                    case .close:
-                        print("📥 Received close frame — closing local")
-                        self?.close() // server asked to close
-                    default:
-                        print("📥 Received opcode: \(wsMeta.opcode)")
+            if let ctx = context,
+               let wsMeta = ctx.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata {
+                self?.opCode = wsMeta.opcode
+                switch wsMeta.opcode {
+                case .text:
+                    if let d = data, let text = String(data: d, encoding: .utf8) {
+                        self?.logger.info("Received text message: \(text)")
+                        self?.onMessageReceiveCallback?(text)
+                    } else {
+                        self?.logger.warning("Received empty text frame")
                     }
+                case .binary:
+                    self?.logger.info("Received binary message: \(data?.count ?? 0) bytes")
+                case .ping:
+                    self?.logger.debug("Received ping (responding with pong)")
+                    self?.sendPong()
+                case .pong:
+                    self?.logger.debug("Received pong")
+                case .close:
+                    self?.logger.info("Received close frame — closing local")
+                    self?.close() // server asked to close
+                default:
+                    self?.logger.debug("Received opcode: \(wsMeta.opcode.rawValue)")
                 }
             } else if let d = data, !d.isEmpty {
                 // If no metadata, attempt to treat as text
                 if let text = String(data: d, encoding: .utf8) {
-                    print("📥 Received (no meta) text: \(text)")
+                    self?.logger.info("Received (no meta) text: \(text)")
                 } else {
-                    print("📥 Received (no meta) binary: \(d.count) bytes")
+                    self?.logger.info("Received (no meta) binary: \(d.count) bytes")
                 }
             } else {
-                print("📥 Received empty frame")
+                self?.logger.debug("Received empty frame")
             }
             
             // Continue receiving next message (unless connection closed)
@@ -144,14 +142,14 @@ class ChatClient {
     /// Close politely (send close frame then cancel)
     func close() {
         guard let connection else {
-            print("Close: no connection")
+            logger.warning("Close: no connection")
             return
         }
         let closeMeta = NWProtocolWebSocket.Metadata(opcode: .close)
         let ctx = NWConnection.ContentContext(identifier: UUID().uuidString, metadata: [closeMeta])
         connection.send(content: nil, contentContext: ctx, isComplete: true, completion: .contentProcessed({ [weak self] error in
             self?.disconnect()
-            print("🔌 NWWebSocket closed")
+            self?.logger.info("NWWebSocket closed")
         }))
     }
     
@@ -160,11 +158,11 @@ class ChatClient {
         guard let conn = connection else { return }
         let wsMeta = NWProtocolWebSocket.Metadata(opcode: .pong)
         let ctx = NWConnection.ContentContext(identifier: UUID().uuidString, metadata: [wsMeta])
-        conn.send(content: nil, contentContext: ctx, isComplete: true, completion: .contentProcessed({ error in
+        conn.send(content: nil, contentContext: ctx, isComplete: true, completion: .contentProcessed({ [weak self] error in
             if let error = error {
-                print("❌ NWWebSocket pong send error: \(error)")
+                self?.logger.error("NWWebSocket pong send error: \(error.localizedDescription)")
             } else {
-                print("🏓 Sent pong")
+                self?.logger.debug("Sent pong")
             }
         }))
     }
