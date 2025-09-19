@@ -11,6 +11,7 @@ let clients = [];
 
 wss.on("connection", (ws) => {
   console.log("Client connected");
+  ws.send("Welcome");
   clients.push(ws);
 
   ws.on("message", (message) => {
