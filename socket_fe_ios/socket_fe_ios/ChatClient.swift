@@ -27,7 +27,7 @@ class ChatClient {
     
     func connect() {
         let nwHost = NWEndpoint.Host(host)
-        guard let nwPort = NWEndpoint.Port(rawValue: self.port) else {
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             logger.error("Invalid port: \(self.port)")
             return
         }
